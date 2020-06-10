@@ -6,6 +6,7 @@ such as what network it is connected to.
 """
 
 import sys, os, subprocess, netifaces
+from pathlib import Path
 from wireless import Wireless
 from datetime import datetime
 
@@ -30,8 +31,8 @@ def setHomePath():
             if homePath[-1] != "/":
                 homePath = homePath + "/"
 
-            homePath = homePath + ".config/piaNetworkTest/"
             logPath = homePath + "Library/Logs/"
+            homePath = homePath + ".config/piaNetworkTest/"
 
     # If there is no home path, there clearly won't be a viable log path
     # so we need to set both.  If nothing else, we'll use the script
@@ -153,6 +154,10 @@ def main():
     # Set a reasonable path for the script to store stuff.
     home, log = setHomePath()
     logData = []
+
+    # Create directories if needed.
+    Path(home).mkdir(parents=True, exist_ok=True)
+    Path(log).mkdir(parents=True, exist_ok=True)
 
     # Filenames for where we're going to put stuff.
     outputLog = log + "piaNetworkTest.log"
