@@ -5,10 +5,11 @@ automatically decide if it should activate the VPN based on factors
 such as what network it is connected to.
 """
 
-import sys, os, subprocess
+import sys, os, subprocess, netifaces
 
 pingAddress = "8.8.8.8" # The default is to use the Google DNS Server
 pingCMD = "/sbin/ping"
+piaCMD = "/usr/local/bin/piactl"
 
 def setHomePath():
     """Sets a path for the script to store data files."""
@@ -39,24 +40,61 @@ def setHomePath():
 
     return homePath, logPath
 
+def runCMD(cmdList):
+    """Runs a command specified by a List variable and returns the exit
+    code as well as the output, decoded to a normal string.
+    """
+    data = subprocess.run(cmdList, capture_output=True)
+    return data.stdout.decode(), data.returncode
+
 def checkInternet():
     """Will ping a network address to determine if the Internet is
     online or not, returns True or False.
     """
     result = False
     ping = [pingCMD, "-c", "1"]
-    test = subprocess.run(ping)
+    text, test = runCMD(ping)
 
-    if test.returncode == 0:
+    if test == 0:
         result = True
 
     return result
 
+def vpnCheck():
+    """Simply checks to see the status of the VPN returning int -1 to 2.
+    -1 for Error
+    0 for Disconnected
+    1 for Connected
+    2 for Connecting
+    """
+    pia = [piaCMD, "get", "connectionstate"]
+    data, ex = runCMD(pia)
+
+    if data == "Disconnected":
+        result = 0
+    elif data == "Connected":
+        result = 1
+    elif data == "Connecting":
+        result = 2
+    else: # In the unlikely event that PIA returns something unknown.
+        result = -1
+
+    return result
+
+def getNetwork():
+    """This finds the interface for the default route and returns it."""
+    gws = netifaces.gateways()
+    defaultGW = gws['default'][netifaces.AF_INET]
+    # We are only interested in the interface itself right now.
+    return defaultGW[1]
+
 def logOutput(logData, logFile):
     """Accepts a list of string to output to the log file."""
-    file = open(logFile, "a")
-    file.writelines(logData)
-    file.close()
+    # Should probably check, if the logData is empty, don't do anything.
+    if len(logData) > 0:
+        file = open(logFile, "a")
+        file.writelines(logData)
+        file.close()
 
 def dataOutput(data, fileName):
     """Accepts some string data to output to a file. """
@@ -84,6 +122,8 @@ def main():
     trustedNetworkFile = home + "trustedNetworks.txt"
     vpnLastChangeFile = home + "vpnLastChange.txt"
 
+    lastNetwork = dataInput(lastNetworkFile)
 
+    vpnStat = vpnCheck()
 
 main()
