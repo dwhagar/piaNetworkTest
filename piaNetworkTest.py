@@ -8,11 +8,12 @@ such as what network it is connected to.
 import sys, os, subprocess, netifaces
 from pathlib import Path
 from wireless import Wireless
-from datetime import datetime
+from datetime import datetime, timedelta
 
 pingAddress = "8.8.8.8" # The default is to use the Google DNS Server
 pingCMD = "/sbin/ping"
 piaCMD = "/usr/local/bin/piactl"
+piaResetTime = 0.01 # Number of hours to stay disconnected before reset.
 
 def setHomePath():
     """Sets a path for the script to store data files."""
@@ -148,10 +149,16 @@ def dataInput(fileName):
     when there is only a single line of data or a list when there is
     more than one line.
     """
-    data = ""
+    data = []
     if os.path.isfile(fileName):
         file = open(fileName, "r")
         data = file.readlines()
+    else:
+        # To make configuration easier, it creates emtpy files
+        # If it cannot find them.
+        file = open(fileName, "w")
+        file.write(os.linesep)
+        file.close()
 
     # Turn the raw data into something usable.
     if len(data) < 1:
@@ -159,14 +166,41 @@ def dataInput(fileName):
     elif len(data) == 1:
         result = data[0]
     else:
-        result = data
+        result = []
+        for line in data:
+            result.append(line.strip(os.linesep))
 
     return result
+
+def checkTrusted(current, trustedFile):
+    """Accepts a current network and a file listing of trusted networks
+    and returns if the current network is trusted or not.
+    """
+    # Now we need to compare our network to trusted networks.
+    trustedNets = dataInput(trustedFile)
+    # We don't know how many entries, if any, are present so
+    # we need to make sure what kind of data is returned.
+    if type(trustedNets) is str:
+        # If we have just 1 network, we need to turn it back into
+        # a list for processing.
+        if trustedNets == "":
+            trustedNets = []
+        else:
+            trustedNets = [trustedNets]
+
+    # Check our list of trusted networks against our current.
+    if len(trustedNets) > 0:
+        for name in trustedNets:
+            if name == current:
+                return True
+
+    return False
 
 def main():
     # Set a reasonable path for the script to store stuff.
     home, log = setHomePath()
-    logData = []
+    now = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+    logData = [now]
 
     # Create directories if needed.
     Path(home).mkdir(parents=True, exist_ok=True)
@@ -179,11 +213,59 @@ def main():
     vpnLastChangeFile = home + "vpnLast.txt"
 
     lastNetwork = dataInput(lastNetworkFile)
-    currentNetwork = getNetwork()
+    lastVPN = dataInput(vpnLastChangeFile)
+
+    # If there is no previous lastVPN state, make it 0.
+    if lastVPN == "":
+        lastVPN = 0
+    else:
+        lastVPN = int(lastVPN)
+
+    currentNetwork = getNetwork() # Are we on a network?
+    vpnState = vpnCheck() # What is the VPN doing?
 
     # If the current and last network are the same, don't do anything.
     if currentNetwork == lastNetwork:
-        sys.exit(0)
+        # Now we're going to try to make sure to bring the VPN back up
+        # if this is not a trusted network and it's been off for a
+        # set amount of time.
+        if currentNetwork != "":
+            trusted = checkTrusted(currentNetwork, trustedNetworkFile)
+            if lastVPN == vpnState:
+                # Some stuff here to reconnect to the VPN if necessary.
+                if not trusted and vpnState == 0:
+                    lastVPNTime = os.path.getmtime(vpnLastChangeFile)
+                    lastVPNTime = datetime.utcfromtimestamp(lastVPNTime)
+
+                    # A wait time defined in number of hours.
+                    wait = timedelta(hours=piaResetTime)
+
+                    # Now, if the last time the VPN changed plus the
+                    # wait time is less is not in the future, we need
+                    # to reconnect the VPN.
+                    if lastVPNTime + wait <= datetime.now():
+                        logData.append("More than " + str(piaResetTime) + " hours has elapsed since PIA was connected.")
+                        logData.append("Connecting to PIA.")
+                        vpnConnect()
+                        dataOutput(str(vpnState), vpnLastChangeFile)
+                        logOutput(logData, outputLog)
+                        return
+            else:
+                # Store the new VPN state.
+                dataOutput(str(vpnState), vpnLastChangeFile)
+
+                # Decide on wording.
+                if vpnState == 0:
+                    vpn = "disconnected."
+                elif vpnState == 1:
+                    vpn = "connected."
+                elif vpnState == 2:
+                    vpn = "connecting."
+
+                # Log the change.
+                logData.append("The VPN state has changed you are now " + vpn)
+                logOutput(logData, outputLog)
+                return
 
     # We're going to make some decisions on what to do about the VPN.
     connectVPN = True # Assume a VPN is needed.
@@ -191,13 +273,10 @@ def main():
 
     # Now we want to mark the log with what time it is since we're doing
     # something.
-    now = datetime.now()
-    logData.append(now.strftime("%Y/%m/%d %H:%M:%S"))
     logData.append("The network state has changed since last check.")
     logOutput(logData, outputLog)
 
     # Now we need to decide if there is Internet.
-    vpnState = vpnCheck() # What is the VPN doing?
     if currentNetwork == "":
         logData.append("There is no network connection.")
         if vpnState > 0:  # If the VPN still thinks we're online, fix it.
@@ -217,25 +296,11 @@ def main():
         if haveInternet:
             logData.append("We are connected to the Internet.")
             # Now we need to compare our network to trusted networks.
-            trustedNets = dataInput(trustedNetworkFile)
-            # We don't know how many entries, if any, are present so
-            # we need to make sure what kind of data is returned.
-            if type(trustedNets) is str:
-                # If we have just 1 network, we need to turn it back into
-                # a list for processing.
-                if trustedNets == "":
-                    trustedNets = []
-                else:
-                    trustedNets = [trustedNets]
-
-            # Check our list of trusted networks against our current.
-            if len(trustedNets) > 0:
-                for name in trustedNets:
-                    if name == currentNetwork:
-                        connectVPN = False
-                        disconnectVPN = True
-                        logData.append("This network is trusted.")
-                        break # We're on a trusted network, stop checking.
+            trusted = checkTrusted(currentNetwork, trustedNetworkFile)
+            if trusted:
+                connectVPN = False
+                disconnectVPN = True
+                logData.append("This network is trusted.")
 
         else: # If there is no Internet, drop the VPN.
             logData.append("While we have a network connection, the Internet is offline.")
@@ -252,11 +317,13 @@ def main():
     if disconnectVPN and vpnState > 0:
         logData.append("Disconnecting from PIA.")
         vpnDrop()
+        dataOutput(str(vpnState), vpnLastChangeFile)
     # It is probably not necessary to be so explicate, just feels like
     # it could save debugging later for unexpected results.
     elif (not disconnectVPN) and connectVPN and vpnState < 1:
         logData.append("Connecting to PIA.")
         vpnConnect()
+        dataOutput(str(vpnState), vpnLastChangeFile)
 
     # Assume everything went well and flush the log / exit.
     logOutput(logData, outputLog)
