@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 pingAddress = "8.8.8.8" # The default is to use the Google DNS Server
 pingCMD = "/sbin/ping"
 piaCMD = "/usr/local/bin/piactl"
-piaResetTime = 0.01 # Number of hours to stay disconnected before reset.
+piaResetTime = 8 # Number of hours to stay disconnected before reset.
 
 def setHomePath():
     """Sets a path for the script to store data files."""
@@ -212,6 +212,7 @@ def main():
     trustedNetworkFile = home + "trustedNetworks.txt"
     vpnLastChangeFile = home + "vpnLast.txt"
 
+    # Check out what happened in the past.
     lastNetwork = dataInput(lastNetworkFile)
     lastVPN = dataInput(vpnLastChangeFile)
 
@@ -235,15 +236,16 @@ def main():
                 # Some stuff here to reconnect to the VPN if necessary.
                 if not trusted and vpnState == 0:
                     lastVPNTime = os.path.getmtime(vpnLastChangeFile)
-                    lastVPNTime = datetime.utcfromtimestamp(lastVPNTime)
+                    lastVPNTime = datetime.fromtimestamp(lastVPNTime)
 
                     # A wait time defined in number of hours.
                     wait = timedelta(hours=piaResetTime)
-
+                    reconnectTime = lastVPNTime + wait
+                    n = datetime.now()
                     # Now, if the last time the VPN changed plus the
                     # wait time is less is not in the future, we need
                     # to reconnect the VPN.
-                    if lastVPNTime + wait <= datetime.now():
+                    if reconnectTime <= datetime.now():
                         logData.append("More than " + str(piaResetTime) + " hours has elapsed since PIA was connected.")
                         logData.append("Connecting to PIA.")
                         vpnConnect()
@@ -263,9 +265,12 @@ def main():
                     vpn = "connecting."
 
                 # Log the change.
-                logData.append("The VPN state has changed you are now " + vpn)
+                logData.append("The VPN state has changed, you are now " + vpn)
                 logOutput(logData, outputLog)
-                return
+
+        # If we end up with the networks the same, default to just
+        # returning.
+        return
 
     # We're going to make some decisions on what to do about the VPN.
     connectVPN = True # Assume a VPN is needed.
