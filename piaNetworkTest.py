@@ -131,6 +131,7 @@ def logOutput(logData, logFile):
         for line in logData:
             print(line) # We want to echo the log to the console for debugging.
             file.write(line)
+            file.write(os.linesep)
         file.close()
         # We're going to treat the log data like a buffer so we can do
         # intermittent writes to the log.
@@ -153,11 +154,12 @@ def dataInput(fileName):
         data = file.readlines()
 
     # Turn the raw data into something usable.
-    result = data.splitlines()
-    if len(result) < 1:
+    if len(data) < 1:
         result = ""
-    elif len(result) == 1:
-        result = result[0]
+    elif len(data) == 1:
+        result = data[0]
+    else:
+        result = data
 
     return result
 
@@ -231,6 +233,8 @@ def main():
                 for name in trustedNets:
                     if name == currentNetwork:
                         connectVPN = False
+                        disconnectVPN = True
+                        logData.append("This network is trusted.")
                         break # We're on a trusted network, stop checking.
 
         else: # If there is no Internet, drop the VPN.
@@ -239,7 +243,7 @@ def main():
 
     # After we've decided what to do, save the network name so we know
     # when something has changed.
-    # dataOutput(currentNetwork, lastNetworkFile)
+    dataOutput(currentNetwork, lastNetworkFile)
 
     # Lets just go ahead and save the log output right now.
     logOutput(logData, outputLog)
