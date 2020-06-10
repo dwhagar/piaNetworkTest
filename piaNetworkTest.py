@@ -6,6 +6,8 @@ such as what network it is connected to.
 """
 
 import sys, os, subprocess, netifaces
+from wireless import Wireless
+from datetime import datetime
 
 pingAddress = "8.8.8.8" # The default is to use the Google DNS Server
 pingCMD = "/sbin/ping"
@@ -82,11 +84,26 @@ def vpnCheck():
     return result
 
 def getNetwork():
-    """This finds the interface for the default route and returns it."""
+    """Tries to discover the name of the current network, first the
+    network interface but then the name of the WiFi network, if no
+    WiFi network is present, it will return the name of the network
+    interface.  If there is no default route and thus no Internet then
+    it will return an empty string."""
     gws = netifaces.gateways()
-    defaultGW = gws['default'][netifaces.AF_INET]
-    # We are only interested in the interface itself right now.
-    return defaultGW[1]
+    # Need to make sure the default route exists.
+    if gws['default'] != {}:
+        defaultGW = gws['default'][netifaces.AF_INET]
+        currentNetwork = defaultGW[1]
+    else: # If the above is true, there is no default route
+        return ""
+
+    # Now we need to check to see if we're on a WiFi network or not.
+    w = Wireless()
+    wName = w.current()
+    if not wName is None:
+        currentNetwork = wName
+
+    return currentNetwork
 
 def logOutput(logData, logFile):
     """Accepts a list of string to output to the log file."""
@@ -95,6 +112,9 @@ def logOutput(logData, logFile):
         file = open(logFile, "a")
         file.writelines(logData)
         file.close()
+        # We're going to treat the log data like a buffer so we can do
+        # intermittent writes to the log.
+        logData.clear()
 
 def dataOutput(data, fileName):
     """Accepts some string data to output to a file. """
@@ -103,27 +123,86 @@ def dataOutput(data, fileName):
     file.close()
 
 def dataInput(fileName):
-    """Reads a line of data from a file and returns it as a string."""
+    """Reads a line of data from a file and returns either a string for
+    when there is only a single line of data or a list when there is
+    more than one line.
+    """
+    data = ""
     if os.path.isfile(fileName):
         file = open(fileName, "r")
-        result = file.read()
-    else:
+        data = file.readlines()
+
+    # Turn the raw data into something usable.
+    result = data.splitlines()
+    if len(result) < 1:
         result = ""
+    elif len(result) == 1:
+        result = result[0]
 
     return result
 
 def main():
     # Set a reasonable path for the script to store stuff.
     home, log = setHomePath()
+    logData = []
 
     # Filenames for where we're going to put stuff.
     outputLog = log + "piaNetworkTest.log"
     lastNetworkFile = home + "networkLast.txt"
     trustedNetworkFile = home + "trustedNetworks.txt"
-    vpnLastChangeFile = home + "vpnLastChange.txt"
+    vpnLastChangeFile = home + "vpnLast.txt"
 
     lastNetwork = dataInput(lastNetworkFile)
+    currentNetwork = getNetwork()
 
-    vpnStat = vpnCheck()
+    # If the current and last network are the same, don't do anything.
+    if currentNetwork == lastNetwork:
+        sys.exit(0)
+
+    # We're going to make some decisions on what to do about the VPN.
+    connectVPN = True # Assume a VPN is needed.
+    disconnectVPN = False # Assume we don't need to disconnect.
+
+    # Now we want to mark the log with what time it is since we're doing
+    # something.
+    now = datetime.now()
+    dt = now.strftime("%Y/%m/%d %H:%M:%S")
+    logData.append(dt)
+    logData.append("The network state has changed since last check.")
+    logOutput(logData, outputLog)
+
+    # Now we need to decide if there is Internet.
+    vpnStat = vpnCheck() # What is the VPN doing?
+    if currentNetwork == "":
+        if vpnStat > 0:  # If the VPN still thinks we're online, fix it.
+            disconnectVPN = True
+        elif vpnStat < 0:  # If there was an error, get out of here.
+            logData.append("Something went wrong with the VPN status check.")
+            # This will ensure there won't be 100's of log entries
+            # saying that there is an issue, in theory.
+            dataOutput(currentNetwork, lastNetworkFile)
+            logOutput(logData, outputLog)
+            sys.exit(1) # There was a problem, so exit NOW.
+    else:
+        # Now what do we do if the network is live?
+        # Check to see if we can Ping the Internet.
+        haveInternet = checkInternet()
+        if haveInternet:
+            # Now we need to compare our network to trusted networks.
+            trustedNets = dataInput(trustedNetworkFile)
+            # We don't know how many entries, if any, are present so
+            # we need to make sure what kind of data is returned.
+            if type(trustedNets) is str:
+                # If we have just 1 network, we need to turn it back into
+                # a list for processing.
+                trustedNets = [trustedNets]
+
+            for name in trustedNets:
+                if name == currentNetwork:
+                    connectVPN = False
+                    break # We're on a trusted network, stop checking.
+
+        else: # If there is no Internet, drop the VPN.
+            disconnectVPN = True
 
 main()
