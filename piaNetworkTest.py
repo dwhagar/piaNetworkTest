@@ -45,17 +45,26 @@ def setHomePath():
 
 def runCMD(cmdList):
     """Runs a command specified by a List variable and returns the exit
-    code as well as the output, decoded to a normal string.
+    code as well as the output, decoded to a normal string for a single
+    line and a list of strings for multiple lines.
     """
     data = subprocess.run(cmdList, capture_output=True)
-    return data.stdout.decode(), data.returncode
+
+    # Parse the output to give either a list or a single string.
+    output = data.stdout.decode().splitlines()
+    if not output:
+        output = ""
+    elif len(output) == 1:
+        output = output[0]
+
+    return output, data.returncode
 
 def checkInternet():
     """Will ping a network address to determine if the Internet is
     online or not, returns True or False.
     """
     result = False
-    ping = [pingCMD, "-c", "1"]
+    ping = [pingCMD, "-c", "1", pingAddress]
     text, test = runCMD(ping)
 
     if test == 0:
@@ -119,7 +128,9 @@ def logOutput(logData, logFile):
     # Should probably check, if the logData is empty, don't do anything.
     if len(logData) > 0:
         file = open(logFile, "a")
-        file.writelines(logData)
+        for line in logData:
+            print(line) # We want to echo the log to the console for debugging.
+            file.write(line)
         file.close()
         # We're going to treat the log data like a buffer so we can do
         # intermittent writes to the log.
@@ -199,6 +210,7 @@ def main():
     else:
         # Now what do we do if the network is live?
         # Check to see if we can Ping the Internet.
+        logData.append("We are connected to the network " + currentNetwork + ".")
         haveInternet = checkInternet()
         if haveInternet:
             logData.append("We are connected to the Internet.")
@@ -225,16 +237,20 @@ def main():
             logData.append("While we have a network connection, the Internet is offline.")
             disconnectVPN = True
 
+    # After we've decided what to do, save the network name so we know
+    # when something has changed.
+    # dataOutput(currentNetwork, lastNetworkFile)
+
     # Lets just go ahead and save the log output right now.
     logOutput(logData, outputLog)
 
     # Now we change the VPN state if we have to.
-    if disconnectVPN:
+    if disconnectVPN and vpnState > 0:
         logData.append("Disconnecting from PIA.")
         vpnDrop()
     # It is probably not necessary to be so explicate, just feels like
     # it could save debugging later for unexpected results.
-    elif (not disconnectVPN) and connectVPN:
+    elif (not disconnectVPN) and connectVPN and vpnState < 1:
         logData.append("Connecting to PIA.")
         vpnConnect()
 
