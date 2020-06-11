@@ -285,8 +285,12 @@ def main():
     if currentNetwork == "":
         logData.append("There is no network connection.")
         if vpnState > 0:  # If the VPN still thinks we're online, fix it.
+            connectVPN = False
             disconnectVPN = True
-        elif vpnState < 0:  # If there was an error, get out of here.
+        elif vpnState == 0: # There is no network and VPN is off
+            connectVPN = False
+            disconnectVPN = False
+        else:  # If there was an error, get out of here.
             logData.append("Something went wrong with the VPN status check, exiting immediately.")
             # This will ensure there won't be 100's of log entries
             # saying that there is an issue, in theory.
