@@ -217,7 +217,7 @@ def main():
     lastVPN = dataInput(vpnLastChangeFile)
 
     # If there is no previous lastVPN state, make it 0.
-    if lastVPN == "":
+    if lastVPN == "" or lastVPN == os.linesep:
         lastVPN = 0
     else:
         lastVPN = int(lastVPN)
