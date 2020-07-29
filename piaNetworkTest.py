@@ -77,19 +77,19 @@ def vpnCheck():
     """Simply checks to see the status of the VPN returning int -1 to 2.
     -1 for Error
     0 for Disconnected
-    1 for Connected
-    2 for Connecting
+    1 for Connecting
+    2 for Connected
     """
     pia = [piaCMD, "get", "connectionstate"]
     data, ex = runCMD(pia)
 
-    if data == "Disconnected":
+    if data == "Disconnected" or data == "Interrupted" or data == "Disconnecting":
         result = 0
-    elif data == "Connected":
+    elif data == "Connecting" or data == "Reconnecting" or data == "DisconnectingToReconnect":
         result = 1
-    elif data == "Connecting":
+    elif data == "Connected":
         result = 2
-    else: # In the unlikely event that PIA returns something unknown.
+    else:
         result = -1
 
     return result
@@ -260,9 +260,11 @@ def main():
                 if vpnState == 0:
                     vpn = "disconnected."
                 elif vpnState == 1:
-                    vpn = "connected."
-                elif vpnState == 2:
                     vpn = "connecting."
+                elif vpnState == 2:
+                    vpn = "connected."
+                else:
+                    vpn = "unknown."
 
                 # Log the change.
                 logData.append("The VPN state has changed, you are now " + vpn)
